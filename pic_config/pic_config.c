@@ -1,8 +1,10 @@
-#define NO_BIT_DEFINES
-#include <pic14regs.h>
-#include <stdint.h>
+#include <pic12f629.h>
 
-__code uint16_t __at (_CONFIG) __configword = _INTRC_OSC_NOCLKOUT & _WDTE_OFF;
+static __code int __at(_CONFIG) 
+	config = _FOSC_INTRCIO
+	        & _WDT_OFF
+	        & _PWRTE_ON
+	        & _MCLRE_OFF;
 
 #define CLOCKPIN    0b00010000; // GP4
 #define DATAPIN     0b00000100; // GP3
@@ -10,42 +12,61 @@ __code uint16_t __at (_CONFIG) __configword = _INTRC_OSC_NOCLKOUT & _WDTE_OFF;
 #define NOTCLOCKPIN 0b11101111; // GP4
 #define NOTDATAPIN  0b11111011; // GP3
 
+#define CLK GP4
+#define DAT GP3
+
 int width=1000;
 int widthhalf=500;
  
 #define OUTPUT 0
 #define INPUT  1
 
-void ndelay(int t) {
-  for(int n=0;n<t;n++);
+
+void wait(int time_ms) {
+	static unsigned char t_adj = 50;
+	while (time_ms--) {
+		TMR0 = t_adj;
+		T0IE = 1;
+		OPTION_REG = 1;
+		while (T0IE) {
+			__asm
+				nop
+				nop
+				nop
+				nop
+			__endasm;
+		}
+		OPTION_REG = 0;
+	}
 }
 
-void write(int p,int v) {
-  if(v == 1) GPIO = GPIO | (1 << p);
-  if(v == 0) GPIO = GPIO & (0xFF^(1 << p));
-}
+//
+//void write(int p,int v) {
+//  if(v == 1) GPIO = GPIO | (1 << p);
+//  if(v == 0) GPIO = GPIO & (0xFF^(1 << p));
+//}
 
 void send_data_bit(int data) {
   char n=0;
-  GPIO = 0;                 // CLK 0
-  for(n=0;n<255;n++);  // DELAY
-  if(data == 1) GPIO = DATAPIN; // DATA 1 (otherwise do nothing)
-  for(n=0;n<255;n++);  // DELAY
-  GPIO = GPIO | CLOCKPIN; // CLK 1
-  for(n=0;n<255;n++);  // DELAY
-  for(n=0;n<255;n++);  // DELAY
-  GPIO = GPIO & NOTCLOCKPIN; // CLK 0
+	CLK=0;
+  wait(1);
+	if(data == 1) DAT = 1;
+	if(data == 0) DAT = 0;
+  wait(1);
+	CLK=1;
+  wait(2);
+	CLK=0;
 }
  
 
 void outhigh() {
-  GPIO = DATAPIN;
+  DAT=1;
 }
  
-void send_data(uint16_t data,int16_t len) {
+void send_data(unsigned int data,int len) {
  
-  for(int16_t n=len-1;n>=0;n--) {
-    if(data & ((uint16_t)1 << n)) {
+  for(int n=len-1;n>=0;n--) {
+    if(data & ((unsigned int)1 << n)) {
       send_data_bit(1);
     } else {
       send_data_bit(0);
@@ -53,7 +74,7 @@ void send_data(uint16_t data,int16_t len) {
   }
 }
  
-void write_op(int phy,int reg,uint16_t data) {
+void write_op(int phy,int reg,unsigned int data) {
    
   send_data_bit(1);
  
@@ -80,18 +101,33 @@ void write_op(int phy,int reg,uint16_t data) {
 //   monitoring port, res, mirrored port tx
 //4: 001 ,00000,00000001  
  
-uint16_t reg3 = 0xE001;
-uint16_t reg4 = 0x2001;
+//unsigned int reg3 = 0xE001;
+//unsigned int reg4 = 0x2001;
 
 void main() {
 
-  TRISIO=0;
-  // Configure port
+	// reset
+	OPTION_REG = 0;
+	CMCON      = 0x07;
+	TRISIO     = 0;
+	GPIO       = 0b0;
+	GIE  = 1;
 
+	GP1 = 0;
+
+  TRISIO=0;
+	GP1 = 0;
+
+OSCCAL = 0x80;
   outhigh();
-  ndelay(100000); // five seconds
+	for(;;) {
+    wait(1); // five seconds
+	GP1 = 0;
+    wait(1); // five seconds
    
-  write_op(20,3,reg3);
-  write_op(20,4,reg4);
-  for(int n=0;n<5;n++) for(int m=0;m<60;m++) ndelay(20000); // 5mins
+    write_op(20,3,0xE001);
+    write_op(20,4,0x2001);
+    //for(int n=0;n<5;n++) for(int m=0;m<60;m++) wait(1); // 5mins
+	GP1 = 1;
+	}
 }
